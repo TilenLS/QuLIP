@@ -6,6 +6,9 @@ data_compact/
 results/
 text/
 *.ipynb
+*.db
+*.zip
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
