@@ -53,27 +53,3 @@ def replace_out(target_diag):
             target_len -= 2
     target_diag.cod = special_type
 
-
-def tree2arr(CCG_tree):
-    explr_arr = deque([(CCG_tree, 0)])
-    ccg_order = []
-    left = 0
-    
-    while True:
-        cur_node, left = explr_arr.pop()
-        ccg_order.append((cur_node.text, cur_node.rule, left))
-
-        if not cur_node.is_leaf:
-            if cur_node.is_binary:
-                lchild, rchild = cur_node.children
-                explr_arr.appendleft((lchild, left))
-                explr_arr.appendleft((rchild, left+len(lchild.text.split(' '))))
-            if cur_node.is_unary: 
-                explr_arr.appendleft((cur_node.children[0], left))
-
-        if len(explr_arr) == 0:
-            break
-        left += 1
-
-    return ccg_order
-
