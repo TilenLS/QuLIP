@@ -8,6 +8,9 @@ text/
 *.ipynb
 *.db
 *.zip
+*.jpg
+*.png 
+mlf_dbs/
 
 
 # Byte-compiled / optimized / DLL files

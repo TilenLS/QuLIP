@@ -24,6 +24,10 @@ class EinsumModel(PytorchQuantumModel):
     def temp(self):
         return torch.exp(self.log_temp)
     
+    @property 
+    def params(self):
+        return self.weights
+    
     @property
     def grad_norm(self):
         total_norm = 0.0
@@ -152,7 +156,6 @@ class EinsumModel(PytorchQuantumModel):
                     symbols = [symbol for symbol, _ in column]
                     weight_indices = [self.sym2weight[s] for s in symbols]
                     thetas = self.weights[weight_indices] 
-                    thetas = self.dropout(thetas, training=training)
                     if op_type == 'Rz': gate_batch = BatchRz(thetas, self.precision)
                     elif op_type == 'Rx': gate_batch = BatchRx(thetas, self.precision)
                     elif op_type == 'Ry': gate_batch = BatchRy(thetas, self.precision)
@@ -176,6 +179,7 @@ class EinsumModel(PytorchQuantumModel):
             results[list(indices)] = group_out
         return results
     
+    # add option to submsampe
     def get_embeddings_aro(self, data_loader):
         pos_txt_out = []
         neg_txt_out = []
@@ -183,12 +187,9 @@ class EinsumModel(PytorchQuantumModel):
         for batch in data_loader:
             pos_circ, neg_circ, img = batch
 
-            try:
-                pos_txt = model.fast_batch_contract(pos_circ)
-                neg_txt = model.fast_batch_contract(neg_circ)
-                img = torch.stack([img_enc for img_enc in img])
-            except:
-                continue
+            pos_txt = self.fast_batch_contract(pos_circ)
+            neg_txt = self.fast_batch_contract(neg_circ)
+            img = torch.stack([img_enc for img_enc in img])
 
             pos_txt = pos_txt.reshape(pos_txt.size(0), -1)
             pos_txt = F.normalize(pos_txt, dim=1, p=2)
@@ -211,12 +212,9 @@ class EinsumModel(PytorchQuantumModel):
         for batch in data_loader:
             circ, pos_img_enc, neg_img_enc = batch
 
-            try:
-                txt = model.fast_batch_contract(circ)
-                pos_img = torch.stack([img_enc for img_enc in pos_img_enc])
-                neg_img = torch.stack([img_enc for img_enc in neg_img_enc])
-            except:
-                continue
+            txt = self.fast_batch_contract(circ)
+            pos_img = torch.stack([img_enc for img_enc in pos_img_enc])
+            neg_img = torch.stack([img_enc for img_enc in neg_img_enc])
 
             txt = txt.reshape(txt.size(0), -1)
             txt = F.normalize(txt, dim=1, p=2)
@@ -323,116 +321,6 @@ class QInfoNCE_log(torch.nn.Module):
         loss_txt = self.cross_entropy(logits, labels)
         loss_img = self.cross_entropy(logits.t(), labels)
         return (loss_txt + loss_img) / 2  
-    
-class QInfoNCE_v4(torch.nn.Module):
-    def __init__(self, eps=1e-12, lambda_reg=0.1, device=None):
-        super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
-        self.eps = eps
-        self.lambda_reg = lambda_reg
-    
-    def forward(self, txt, img, T=0.07):
-        B = txt.size(0)
-        txt = F.normalize(txt.reshape(B, -1), dim=-1, p=2)
-        img = F.normalize(img.reshape(B, -1), dim=-1, p=2)
-
-        gram_mat = txt @ img.conj().t()
-        fidelities = gram_mat.abs()**2
-        F_sharp = fidelities ** (1.0 / T)
-
-        z_batch = torch.sum(F_sharp, dim=-1, keepdim=True)
-        p_correct = torch.diag(F_sharp).unsqueeze(1) / (z_batch + self.eps)
-        loss = -torch.log(p_correct + self.eps)
-
-        return loss.mean()
-    
-class QInfoNCE_v5(torch.nn.Module):
-    def __init__(self, eps=1e-12, lambda_reg=0.1, device=None):
-        super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
-        self.eps = eps
-        self.lambda_reg = lambda_reg
-    
-    def forward(self, txt, img, T=0.07):
-        B = txt.size(0)
-        txt = F.normalize(txt.reshape(B, -1), dim=-1, p=2)
-        img = F.normalize(img.reshape(B, -1), dim=-1, p=2)
-
-        gram_mat = txt @ img.conj().t()
-        fidelities = gram_mat.abs()**2
-        F_sharp = fidelities ** (1.0 / T)
-
-        z_t2i = torch.sum(F_sharp, dim=1, keepdim=True)
-        p_t2i = torch.diag(F_sharp).unsqueeze(1) / (z_t2i + self.eps)
-        loss_t2i = -torch.log(p_t2i + self.eps).mean()
-
-        z_i2t = torch.sum(F_sharp, dim=0, keepdim=True)
-        p_i2t = torch.diag(F_sharp).unsqueeze(1) / (z_i2t.t() + self.eps)
-        loss_i2t = -torch.log(p_i2t + self.eps).mean()
-
-        return (loss_t2i + loss_i2t) / 2.0
-    
-class QInfoNCE_v6(torch.nn.Module):
-    def __init__(self, eps=1e-12, lambda_reg=0.1, device=None):
-        super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
-        self.eps = eps
-        self.lambda_reg = lambda_reg
-    
-    def forward(self, txt, img, T=0.07):
-        B = txt.size(0)
-        txt = F.normalize(txt.reshape(B, -1), dim=-1, p=2)
-        img = F.normalize(img.reshape(B, -1), dim=-1, p=2)
-
-        gram_mat = txt @ img.conj().t()
-        fidelities = gram_mat.abs()**2
-        F_sharp = fidelities ** (1.0 / T)
-
-        z_t2i = torch.sum(F_sharp, dim=1, keepdim=True)
-        p_t2i = torch.diag(F_sharp).unsqueeze(1) / (z_t2i + self.eps)
-        loss_t2i = -torch.log(p_t2i + self.eps).mean()
-
-        z_i2t = torch.sum(F_sharp, dim=0, keepdim=True)
-        p_i2t = torch.diag(F_sharp).unsqueeze(1) / (z_i2t.t() + self.eps)
-        loss_i2t = -torch.log(p_i2t + self.eps).mean()
-
-        loss_sym = (loss_t2i + loss_i2t) / 2.0
-
-        txt_gram = txt @ txt.conj().t()
-        txt_fidelities = txt_gram.abs()**2
-        purity_penalty = (txt_fidelities.sum() - B) / (B * (B - 1))
-
-        return loss_sym + (self.lambda_reg * purity_penalty)
-
-class QInfoNCE_v7(torch.nn.Module):
-    def __init__(self, eps=1e-6, lambda_reg=0.1, device=None):
-        super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
-        self.eps = eps
-        self.lambda_reg = lambda_reg
-    
-    def forward(self, txt, img, T=0.07):
-        B = txt.size(0)
-        txt = F.normalize(txt.reshape(B, -1), dim=-1, p=2)
-        img = F.normalize(img.reshape(B, -1), dim=-1, p=2)
-
-        overlap = (txt @ img.conj().t()).abs()
-        thetas = torch.acos(overlap.clamp(0, 1 - self.eps))
-        logits = ((torch.full(thetas.size(), torch.pi/2) - thetas) / (torch.pi/2)) / T
-
-        labels = torch.arange(B, device=txt.device)
-        loss_t2i = F.cross_entropy(logits, labels)
-        loss_i2t = F.cross_entropy(logits.t(), labels)
-        loss_sym = (loss_t2i + loss_i2t) / 2.0
-
-        txt_overlap = (txt @ txt.conj().t()).abs()
-        txt_thetas = torch.acos(txt_overlap.clamp(0, 1 - self.eps))
-        txt_logits = (torch.full(txt_thetas.size(), torch.pi/2) - txt_thetas)
-        off_diagonal_mask = ~torch.eye(B, dtype=torch.bool, device=self.device)
-        closeness = txt_logits[off_diagonal_mask]
-        purity_penalty = torch.mean(closeness**2)
-
-        return loss_sym + (self.lambda_reg * purity_penalty)
 
 def update_model(model, data_loader, loss_fn, acc_fn, optimizer):
     cum_loss = cum_acc = cum_grad = 0

@@ -1,28 +1,116 @@
+from collections import defaultdict
+
 import torch, random
 import numpy as np
+from collections import defaultdict
+from tqdm import tqdm
+from opt_einsum import contract_path
+import cotengra as ctg
 
-def max_width(einsum_str, tarr):
-    from opt_einsum import contract_path
+def get_md(data_arr):
+    max_width = 0
+    avg_width = 0
+    max_nq = 0
+    avg_nq = 0
+    max_cdepth = 0
+    avg_cdepth = 0
+    max_gates = 0
+    avg_gates = 0
+    N = len(data_arr)
+    path_cache = {}
+    for einsum_expr, tarr in tqdm(data_arr):
+        nq, width, cdepth, ngates = analyse_einsum(einsum_expr, tarr, cache=path_cache)
+        max_width = max(max_width, width)
+        max_nq = max(max_nq, nq)
+        max_cdepth = max(max_cdepth, cdepth)
+        max_gates = max(max_gates, ngates)
+        avg_width += width
+        avg_nq += nq
+        avg_cdepth += cdepth
+        avg_gates += ngates
+    avg_width /= N
+    avg_nq /= N
+    avg_cdepth /= N
+    avg_gates /= N
+    return {'max': (max_nq, max_width, max_cdepth, max_gates), 'avg': (int(round(avg_nq)), int(round(avg_width)), int(round(avg_cdepth)), int(round(avg_gates)))}
+
+def analyse_einsum(einsum_expr, tarr, cache={}):
+    op_types = tuple(op[1] for op in tarr)
+    input_subs, output_sub = einsum_expr
+    einsum_str = ','.join([''.join(ten) for ten in input_subs]) + '->' + ','.join([''.join(ten) for ten in output_sub])
+    cache_key = (einsum_str, op_types)
+    if cache_key in cache:
+            return cache[cache_key]
+
+    qubit_depths = defaultdict(int)
     shapes = []
-    for i, (symbol, op_type) in enumerate(tarr):
+    nq = 0
+            
+    for i, (subscript, (symbol, op_type)) in enumerate(zip(input_subs, tarr)):
         if symbol is None:
-            if op_type == 'sqrt':
-                data = torch.tensor(2.0**0.5, dtype=torch.complex64)
+            if op_type == 'sqrt': data_shape = torch.Size([])
             elif op_type == '0':
-                data = torch.tensor([1,0], dtype=torch.complex64)
-            elif op_type == 'H':
-                data = torch.tensor([[1.0, 1.0], [1.0, -1.0]], dtype=torch.complex64) / (2.0**0.5)
-            elif op_type == 'CX':
-                data = torch.block_diag(torch.eye(2), torch.tensor([[0.0,1.0],[1.0,0.0]], dtype=torch.complex64)).reshape(2,2,2,2)
-            shapes.append(data.shape)
+                data_shape = torch.Size([2])
+                nq += 1
+            elif op_type == 'H': data_shape = torch.Size([2, 2])
+            elif op_type == 'CX': data_shape = torch.Size([2, 2, 2, 2])
         else:
-            if op_type == 'Rz' or op_type == 'Rx' or op_type == 'Ry':
-                shapes.append(torch.Size([2, 2]))
-            if op_type == 'CRz' or op_type == 'CRx' or op_type == 'CRy': 
-                shapes.append(torch.Size([2, 2, 2, 2]))
-    path_info = contract_path(einsum_str, *shapes, shapes=True)
-    return path_info[1].largest_intermediate
-    
+            if op_type in ['Rz', 'Rx', 'Ry']: data_shape = torch.Size([2, 2])
+            elif op_type in ['CRz', 'CRx', 'CRy']: data_shape = torch.Size([2, 2, 2, 2])
+        shapes.append(data_shape)
+
+        if op_type not in ['0', 'sqrt']:
+            current_gate_max = 0
+            for char in subscript:
+                current_gate_max = max(current_gate_max, qubit_depths[char])
+            new_depth = current_gate_max + 1
+            for char in subscript:
+                qubit_depths[char] = new_depth
+
+    cdepth = max(qubit_depths.values()) if qubit_depths else 0
+    # opt = ctg.HyperOptimizer(methods=['kahypar', 'greedy'], max_repeats=16, parallel=True)
+    # tree = ctg.einsum_tree(einsum_str, *[tuple(int(d) for d in s) for s in shapes], optimize=opt)
+    # max_width = tree.contraction_width()
+    interleaved_args = []
+    for shape, sub in zip(shapes, input_subs):
+        interleaved_args.append(shape)
+        interleaved_args.append(sub)
+    interleaved_args.append(output_sub)
+    path_info = contract_path(*interleaved_args, shapes=True)
+    max_width = int(np.log2(float(path_info[1].largest_intermediate)))
+    cache[cache_key] = (max_width, nq, cdepth, len(tarr))
+    return nq, max_width, cdepth, len(tarr)
+
+# def max_width(einsum_str, tarr):
+#     from opt_einsum import contract_path
+#     shapes = []
+#     nq = 0
+#     tensors = einsum_str.split('->')[0].split(',')
+#     for tensor in tensors:
+#         if len(tensor) == 1:
+#             nq += 1
+
+#     for i, (symbol, op_type) in enumerate(tarr):
+#         if symbol is None:
+#             if op_type == 'sqrt':
+#                 data = torch.tensor(2.0**0.5, dtype=torch.complex64)
+#             elif op_type == '0':
+#                 data = torch.tensor([1,0], dtype=torch.complex64)
+#                 nq += 1
+#             elif op_type == 'H':
+#                 data = torch.tensor([[1.0, 1.0], [1.0, -1.0]], dtype=torch.complex64) / (2.0**0.5)
+#             elif op_type == 'CX':
+#                 data = torch.block_diag(torch.eye(2), torch.tensor([[0.0,1.0],[1.0,0.0]], dtype=torch.complex64)).reshape(2,2,2,2)
+#             shapes.append(data.shape)
+#         else:
+#             if op_type == 'Rz' or op_type == 'Rx' or op_type == 'Ry':
+#                 shapes.append(torch.Size([2, 2]))
+#             if op_type == 'CRz' or op_type == 'CRx' or op_type == 'CRy': 
+#                 shapes.append(torch.Size([2, 2, 2, 2]))
+#     path_info = contract_path(einsum_str, *shapes, shapes=True)
+#     max_ent = path_info[1].largest_intermediate
+#     return max_ent, nq
+
 def fs_distance(state1, state2):
     inner_product = torch.sum(state1 * state2.conj(), dim=1)
     return (torch.full(inner_product.size(), torch.pi/2) - torch.acos(inner_product.abs().clamp(0,1)))
@@ -32,7 +120,6 @@ def qcosine(bstates1, bstates2, eps=1e-9):
     norm2 = torch.linalg.vector_norm(bstates2, ord=2, dim=1)
     inner_product = torch.sum(bstates1 * bstates2.conj(), dim=1)
     return inner_product.abs() / (norm1 * norm2 + eps)
-
 
 def set_seed(seed):
     np.random.seed(seed)
