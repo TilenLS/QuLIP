@@ -50,11 +50,12 @@ Implemented in `model.py` as `QInfoNCE_cos`, this allows for highly stable gradi
 ### 3. 📊 Results on Compositional Benchmarks
 QuLIP successfully bypasses the "bag-of-words" collapse seen in classical and unstructured quantum models.
 
-Model,Parameters,SVO-Swap,ARO Attribution,ARO Relation
-Quantum BoW,10K - 100K,50.00%,50.00%,50.00%
-MicroCLIP,100K,68.42%,50.85%,51.05%
-CLIP,63M,57.89%,61.00%,51.53%
-QuLIP (CCG-VQC),~90K,83.16%,71.19%,57.33%
+| Model | Parameters | SVO-Swap | ARO Attribution | ARO Relation
+| :-- | :-- | :-- | :-- | :-- |
+**QBoW* | 100K | 50.00% | 50.00% | 50.00%
+**MicroCLIP** | 100K | 68.42% | 50.85% | 51.05%
+**CLIP** | 63M | 57.89% | 61.00% | 51.53%
+**QuLIP** (CCG-VQC) | ~90K | 83.16% | 71.19% | 57.33%
 
 ## 🚀 Quickstart
 
