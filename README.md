@@ -44,7 +44,9 @@ $$s(|\psi_{txt}\rangle, |\psi_{img}\rangle) = \arcsin(|\langle\psi_{txt}|\psi_{i
 
 Implemented in `model.py` as `QInfoNCE_cos`, this allows for highly stable gradient descent during multimodal alignment.
 
+<p align="center">
 ![Loss Landscape](assets/loss_landscape.png)
+<\p>
 *Figure 3: 3D projection of the parameter loss landscape during training, mapped via PCA.*
 
 ### 3. 📊 Results on Compositional Benchmarks
