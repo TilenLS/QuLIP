@@ -16,7 +16,7 @@ Classical Vision-Language Models (VLMs) like CLIP rely heavily on unstructured s
 By treating grammatical compositions as quantum entangling operations and words as parameterized unitary rotations, QuLIP achieves **competitive multimodal alignment (e.g., 83.16% on SVO-Swap)** while utilizing **two orders of magnitude fewer parameters** (10k-100k) than classical baselines like OpenCLIP (63M).
 
 ![QuLIP Pipeline](assets/pipeline.png) 
-*Figure 1: The QuLIP multimodal pipeline. Images are classically embedded and amplitude-encoded into state $|\psi_{img}\rangle$. Sentences are parsed via CCG and topologically mapped to VQCs to generate state $|\phi_{txt}\rangle$. Alignment is computed via a quantum inner product.*
+*Figure 1: The QuLIP multimodal pipeline. Images are classically embedded and amplitude-encoded. Sentences are parsed via CCG and topologically mapped to VQCs to generate the text state. Alignment is computed via a quantum inner product.*
 
 ## 🧬 Repository Structure
 
