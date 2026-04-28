@@ -52,7 +52,7 @@ QuLIP successfully bypasses the "bag-of-words" collapse seen in classical and un
 
 | Model | Parameters | SVO-Swap | ARO Attribution | ARO Relation
 | :-- | :-- | :-- | :-- | :-- |
-**QBoW* | 100K | 50.00% | 50.00% | 50.00%
+**QBoW** | 100K | 50.00% | 50.00% | 50.00%
 **MicroCLIP** | 100K | 68.42% | 50.85% | 51.05%
 **CLIP** | 63M | 57.89% | 61.00% | 51.53%
 **QuLIP** (CCG-VQC) | ~90K | 83.16% | 71.19% | 57.33%
@@ -92,4 +92,28 @@ For questions or collaborations, please reach out:
 * **Tilen G. Limbäck-Stokin:** tilen.limback-stokin.21@ucl.ac.uk
 * **Lab:** [Quantum Learning Labs, UCL](https://www.ucl.ac.uk/engineering/computer-science/research/research-groups-and-centres/programming-principles-logic-and-verification-group/quantum-learning-labs)
 
+## 📚 Key References
 
+This project builds upon foundational work in Category Theory, Quantum Machine Learning, and Computational Linguistics. For the complete bibliography, see [ref(1).bib](./ref(1).bib).
+
+### Quantum Natural Language Processing (QNLP)
+* **lambeq: An Efficient High-Level Python Library for Quantum NLP** *Kartsaklis et al. (2021)*. [arXiv:2110.04236](https://arxiv.org/abs/2110.04236)
+* **A CCG-Based Version of the DisCoCat Framework** *Yeung & Kartsaklis (2021)*. [arXiv:2105.07720](https://arxiv.org/abs/2105.07720)
+* **QNLP in Practice: Running Compositional Models of Meaning on a Quantum Computer** *Lorenz et al. (2023)*. [arXiv:2102.12846](https://arxiv.org/abs/2102.12846)
+* **Mathematical Foundations for a Compositional Distributional Model of Meaning** *Coecke, Sadrzadeh, & Clark (2010)*. [arXiv:1003.4394](https://arxiv.org/abs/1003.4394)
+
+### Vision-Language Models & Compositionality
+* **Learning Transferable Visual Models From Natural Language Supervision (CLIP)** *Radford et al. (2021)*. [arXiv:2103.00020](https://arxiv.org/abs/2103.00020)
+* **When and why Vision-Language Models behave like Bags-of-Words, and what to do about it?** *Yuksekgonul et al. (2023)*. [arXiv:2210.01936](https://arxiv.org/abs/2210.01936)
+* **DisCoCLIP: A Distributional Compositional Tensor Network Encoder for Vision-Language Understanding** *Lo et al. (2025)*. [arXiv:2509.21287](https://arxiv.org/abs/2509.21287)
+* **Does CLIP Bind Concepts? Probing Compositionality in Large Image Models** *Lewis et al. (2024)*. [arXiv:2212.10537](https://arxiv.org/abs/2212.10537)
+
+### Quantum Machine Learning Foundations
+* **Quantum Machine Learning** *Biamonte et al. (2017)*.. [arXiv:1611.09347](https://arxiv.org/abs/1611.09347)
+* **The Power of Quantum Neural Networks** *Abbas et al. (2021)*. [arXiv:2011.00027](https://arxiv.org/abs/2011.00027)
+* **Cost Function Dependent Barren Plateaus in Shallow Parametrized Quantum Circuits** *Cerezo et al. (2021)*. [arXiv:2001.00550](https://arxiv.org/abs/2001.00550)
+* **Expressibility and Entangling Capability of Parameterized Quantum Circuits** *Sim, Johnson, & Aspuru-Guzik (2019)*. [arXiv:1905.10876](https://arxiv.org/abs/1905.10876)
+
+### Linguistic Foundations
+* **Combinatory Categorial Grammar** *Steedman & Baldridge (2011)*. [ACM](https://dl.acm.org/doi/10.3115/982023.982057)
+* **The Syntactic Process** *Steedman (2000)*. [MIT](https://direct.mit.edu/books/monograph/4283/The-Syntactic-Process)
