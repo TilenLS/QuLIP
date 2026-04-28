@@ -47,6 +47,15 @@ Implemented in `model.py` as `QInfoNCE_cos`, this allows for highly stable gradi
 ![Loss Landscape](assets/loss_landscape.png)
 *Figure 3: 3D projection of the parameter loss landscape during training, mapped via PCA.*
 
+### 3. 📊 Results on Compositional Benchmarks
+QuLIP successfully bypasses the "bag-of-words" collapse seen in classical and unstructured quantum models.
+
+Model,Parameters,SVO-Swap,ARO Attribution,ARO Relation
+Quantum BoW,10K - 100K,50.00%,50.00%,50.00%
+MicroCLIP,100K,68.42%,50.85%,51.05%
+CLIP,63M,57.89%,61.00%,51.53%
+QuLIP (CCG-VQC),~90K,83.16%,71.19%,57.33%
+
 ## 🚀 Quickstart
 
 ### Installation
@@ -61,3 +70,25 @@ cd QuLIP
 pip install uv
 uv pip install lambeq pandas tqdm pennylane torch clip mlflow cotengra optuna
 uv pip install git+[https://github.com/openai/CLIP.git](https://github.com/openai/CLIP.git)
+```
+
+## 📜 Citation
+
+If you use this codebase or find our work on quantum compositional semantics helpful, please cite our paper:
+```
+@inproceedings{limbackstokin2026meaning,
+  title={Meaning Representations as Variational Quantum Circuits},
+  author={Limb\"{a}ck-Stokin, Tilen G. and Birdavade, Tanishka A. and Lo, Kin Ian and Sadrzadeh, Mehrnoosh},
+  booktitle={LREC},
+  year={2026},
+  organization={Quantum Learning Labs, University College London}
+}
+```
+
+
+## 📬 Contact
+For questions or collaborations, please reach out:
+* **Tilen G. Limbäck-Stokin:** tilen.limback-stokin.21@ucl.ac.uk
+* **Lab:** [Quantum Learning Labs, UCL](https://www.ucl.ac.uk/engineering/computer-science/research/research-groups-and-centres/programming-principles-logic-and-verification-group/quantum-learning-labs)
+
+
