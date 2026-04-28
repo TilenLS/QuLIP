@@ -46,7 +46,7 @@ Implemented in `model.py` as `QInfoNCE_cos`, this allows for highly stable gradi
 
 <p align="center">
   <img src="assets/loss_landscape.png" />
-<\p>
+</p>
   
 *Figure 3: 3D projection of the parameter loss landscape during training, mapped via PCA.*
 
