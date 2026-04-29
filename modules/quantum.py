@@ -81,7 +81,6 @@ class BaseAnsatz(ABC):
 
             base_symbol = f"{word}__{'@'.join(type_arr)}"
             current_wires, new_indices, new_tensors = self.ansatz(current_wires, base_symbol)
-            
             input_indices.extend(new_indices)
             tensor_arr.extend(new_tensors)
 
@@ -91,58 +90,127 @@ class BaseAnsatz(ABC):
         
         einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
         return einsum_expr, tensor_arr
+    
 
     def tn2ansatz_curried(self, tn):
-        self.reset_char()
+        self.reset_char() # I was here
         ccg_map = self.ccg_map(tn)
-        input_indices, tensor_arr = [], []
 
         lifespans = Counter()
-        for _, idx_arr, _ in tn:
+        for _, idx_arr, type_arr in tn:
             for idx in idx_arr:
-                for gw in ccg_map[idx]:
-                    lifespans[gw] += 1
+                lifespans[idx] += 1
 
-        external_wires = {gw for gw, count in lifespans.items() if count == 1}
         free_qubits = []
-        active_wires = {}
-        cutwidth_counter = 0
+        active_qubits = {}
+        qubit_heads = {}
+        qubit_count = 0
+
+        input_indices, tensor_arr = [], []
 
         for word, idx_arr, type_arr in tn:
-            global_wires = sum([ccg_map[idx] for idx in idx_arr], [])
-            ansatz_inputs = []
+            pqc_inputs = []
 
-            for gw in global_wires:
-                if gw not in active_wires:
-                    if free_qubits:
-                        current_leg = free_qubits.pop()
-                    else: 
-                        current_leg = self.get_char()
-                        cutwidth_counter += 1
-                        input_indices.append([current_leg])
-                        tensor_arr.append((None, '0'))
+            for idx in idx_arr:
+                if idx not in active_qubits:
+                    nq = len(ccg_map[idx])
+                    assigned_qubits = []
+                    for _ in range(nq):
+                        if free_qubits:
+                            qid = free_qubits.pop()
+                        else:
+                            qid = qubit_count
+                            qubit_count += 1
+                            start_wire = self.get_char()
+                            input_indices.append([start_wire])
+                            tensor_arr.append((None, '0'))
+                            qubit_heads[qid] = start_wire
+                        assigned_qubits.append(qid)
+                    active_qubits[idx] = assigned_qubits
 
-                    active_wires[gw] = current_leg
-                ansatz_inputs.append(active_wires[gw])
+                for qid in active_qubits[idx]:
+                    pqc_inputs.append(qubit_heads[qid])
 
             base_symbol = f"{word}__{'@'.join(type_arr)}"
-            current_wires_out, new_indices, new_tensors = self.ansatz(ansatz_inputs, base_symbol)
+            out_idx, gate_idx, gate_ten = self.ansatz(pqc_inputs, base_symbol)
+            input_indices.extend(gate_idx)
+            tensor_arr.extend(gate_ten)
 
-            input_indices.extend(new_indices)
-            tensor_arr.extend(new_tensors)
-
-            for gw, out_leg in zip(global_wires, current_wires_out):
-                active_wires[gw] = out_leg
-                lifespans[gw] -= 1
-                if lifespans[gw] == 0 and gw not in external_wires:
-                    free_qubits.append(out_leg)
-                    del active_wires[gw]
-
-            replace_map = {leg: gw for gw, leg in active_wires.items()}
-            input_indices = [[replace_map.get(w, w) for w in sub] for sub in input_indices]
+            word_qubits = []
+            for idx in idx_arr:
+                word_qubits.extend(active_qubits[idx])
             
+            for qid, new_idx in zip(word_qubits, out_idx):
+                qubit_heads[qid] = new_idx
+
+            if len(out_idx) < len(word_qubits):
+                dead_qubits = word_qubits[len(out_idx):]
+                free_qubits.extend(dead_qubits)
+            
+            for idx in idx_arr: 
+                lifespans[idx] -= 1
+                if lifespans[idx] == 0:
+                    if idx != 0 and idx != '0':  # Don't free root qubits
+                        free_qubits.extend(active_qubits[idx])
+                        del active_qubits[idx]
+
+        root_key = 0 if 0 in active_qubits else '0'
+        if root_key in active_qubits:
+            ccg_map[root_key] = [qubit_heads[qid] for qid in active_qubits[root_key]]
+
         einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
         return einsum_expr, tensor_arr
+
+    # def tn2ansatz_curried(self, tn):
+    #     self.reset_char() # I was here
+    #     ccg_map = self.ccg_map(tn)
+    #     input_indices, tensor_arr = [], []
+
+    #     lifespans = Counter()
+    #     for _, idx_arr, _ in tn:
+    #         for idx in idx_arr:
+    #             for gw in ccg_map[idx]:
+    #                 lifespans[gw] += 1
+
+    #     external_wires = {gw for gw, count in lifespans.items() if count == 1}
+    #     free_qubits = []
+    #     active_wires = {}
+    #     cutwidth_counter = 0
+
+    #     for word, idx_arr, type_arr in tn:
+    #         global_wires = sum([ccg_map[idx] for idx in idx_arr], [])
+    #         ansatz_inputs = []
+
+    #         for gw in global_wires:
+    #             if gw not in active_wires:
+    #                 if free_qubits:
+    #                     current_leg = free_qubits.pop()
+    #                 else: 
+    #                     current_leg = self.get_char()
+    #                     cutwidth_counter += 1
+    #                     input_indices.append([current_leg])
+    #                     tensor_arr.append((None, '0'))
+
+    #                 active_wires[gw] = current_leg
+    #             ansatz_inputs.append(active_wires[gw])
+
+    #         base_symbol = f"{word}__{'@'.join(type_arr)}"
+    #         current_wires_out, new_indices, new_tensors = self.ansatz(ansatz_inputs, base_symbol)
+    #         input_indices.extend(new_indices)
+    #         tensor_arr.extend(new_tensors)
+
+    #         for gw, out_leg in zip(global_wires, current_wires_out):
+    #             active_wires[gw] = out_leg
+    #             lifespans[gw] -= 1
+    #             if lifespans[gw] == 0 and gw not in external_wires:
+    #                 free_qubits.append(out_leg)
+    #                 del active_wires[gw]
+
+    #     replace_map = {leg: gw for gw, leg in active_wires.items()}
+    #     input_indices = [[replace_map.get(w, w) for w in sub] for sub in input_indices]
+
+    #     einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
+    #     return einsum_expr, tensor_arr
 
 class CustomV5Ansatz(BaseAnsatz):
     def __init__(self, obmap=set(), layers=1):
