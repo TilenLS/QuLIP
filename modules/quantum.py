@@ -1,9 +1,12 @@
 from itertools import count
-from collections import Counter
+from collections import Counter, defaultdict
 from abc import ABC, abstractmethod
 from tqdm import tqdm
 import torch
 import pennylane as qml
+from qiskit import QuantumCircuit
+from qiskit.circuit import Parameter
+import numpy as np
 
 OUT_DIM = 9
 dev = qml.device('default.qubit', wires=OUT_DIM)
@@ -65,7 +68,7 @@ class BaseAnsatz(ABC):
         
         return (input_indices, out_list)
 
-    def tn2ansatz(self, tn):
+    def _tn2ansatz(self, tn):
         self.reset_char()
         ccg_map = self.ccg_map(tn)
         input_indices, tensor_arr = [], []
@@ -91,73 +94,126 @@ class BaseAnsatz(ABC):
         einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
         return einsum_expr, tensor_arr
     
-
-    def tn2ansatz_curried(self, tn):
-        self.reset_char() # I was here
-        ccg_map = self.ccg_map(tn)
-
-        lifespans = Counter()
-        for _, idx_arr, type_arr in tn:
-            for idx in idx_arr:
-                lifespans[idx] += 1
-
-        free_qubits = []
-        active_qubits = {}
-        qubit_heads = {}
-        qubit_count = 0
-
+    def tn2ansatz(self, tn):
+        self.reset_char()
+        ccg_map = {}
         input_indices, tensor_arr = [], []
 
         for word, idx_arr, type_arr in tn:
-            pqc_inputs = []
+            N = sum(self.obmap.get(typ, 1) for typ in type_arr)
+            current_wires = [self.get_char() for _ in range(N)]
 
-            for idx in idx_arr:
-                if idx not in active_qubits:
-                    nq = len(ccg_map[idx])
-                    assigned_qubits = []
-                    for _ in range(nq):
-                        if free_qubits:
-                            qid = free_qubits.pop()
-                        else:
-                            qid = qubit_count
-                            qubit_count += 1
-                            start_wire = self.get_char()
-                            input_indices.append([start_wire])
-                            tensor_arr.append((None, '0'))
-                            qubit_heads[qid] = start_wire
-                        assigned_qubits.append(qid)
-                    active_qubits[idx] = assigned_qubits
-
-                for qid in active_qubits[idx]:
-                    pqc_inputs.append(qubit_heads[qid])
+            for w in current_wires:
+                input_indices.append([w])
+                tensor_arr.append((None, '0'))
 
             base_symbol = f"{word}__{'@'.join(type_arr)}"
-            out_idx, gate_idx, gate_ten = self.ansatz(pqc_inputs, base_symbol)
-            input_indices.extend(gate_idx)
-            tensor_arr.extend(gate_ten)
+            current_wires, new_indices, new_tensors = self.ansatz(current_wires, base_symbol)
+            input_indices.extend(new_indices)
+            tensor_arr.extend(new_tensors)
 
-            word_qubits = []
-            for idx in idx_arr:
-                word_qubits.extend(active_qubits[idx])
-            
-            for qid, new_idx in zip(word_qubits, out_idx):
-                qubit_heads[qid] = new_idx
+            i = 0
+            for idx, typ in zip(idx_arr, type_arr):
+                n = self.obmap.get(typ, 1)
+                if idx not in ccg_map:
+                    ccg_map[idx] = current_wires[i:i+n]
+                else:
+                    target_wires = ccg_map[idx]                    
+                    replace_map = dict(zip(current_wires[i:i+n], target_wires))
+                    input_indices = [[replace_map.get(w, w) for w in sub] for sub in input_indices]
+                i += n
+        
+        einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
+        return einsum_expr, tensor_arr
 
-            if len(out_idx) < len(word_qubits):
-                dead_qubits = word_qubits[len(out_idx):]
-                free_qubits.extend(dead_qubits)
-            
-            for idx in idx_arr: 
-                lifespans[idx] -= 1
-                if lifespans[idx] == 0:
-                    if idx != 0 and idx != '0':  # Don't free root qubits
-                        free_qubits.extend(active_qubits[idx])
-                        del active_qubits[idx]
+    def _tn2ansatz_curried(self, tn):
+        self.reset_char()
+        ccg_map = {}
+        input_indices, tensor_arr = [], []
+        tn_sorted = sorted(tn, key=lambda x: (0 in x[1], len(x[1])))
 
-        root_key = 0 if 0 in active_qubits else '0'
-        if root_key in active_qubits:
-            ccg_map[root_key] = [qubit_heads[qid] for qid in active_qubits[root_key]]
+        for word, idx_arr, type_arr in tn_sorted:
+            current_wires = []
+            if len(idx_arr) == 1:
+                n = self.obmap.get(type_arr[0], 1)
+                current_wires.extend([self.get_char() for _ in range(n)])
+                input_indices.extend([[w] for w in current_wires])
+                tensor_arr.extend([(None, '0')] * n)
+            else:
+                elim_counter = defaultdict(int) 
+                for idx, typ in zip(idx_arr, type_arr):
+                    if idx in ccg_map.keys():
+                        current_wires.extend(ccg_map[idx])
+                        elim_counter[typ] += 1 
+                    else:
+                        elim_counter[typ] -= 1 
+                if not any(elim_counter.values()):
+                    pass 
+                else:
+                    for idx, typ in zip(idx_arr, type_arr):
+                        if idx not in ccg_map.keys():
+                            n = self.obmap.get(typ, 1)
+                            new_wires = [self.get_char() for _ in range(n)]
+                            current_wires.extend(new_wires)
+                            input_indices.extend([[w] for w in new_wires])
+                            tensor_arr.extend([(None, '0')] * n)
 
+            base_symbol = f"{word}__{'@'.join(type_arr)}"
+            current_wires, new_indices, new_tensors = self.ansatz(current_wires, base_symbol)
+            input_indices.extend([[idx for idx in ten] for ten in new_indices])
+            tensor_arr.extend(new_tensors)
+
+            i = 0
+            for idx, typ in zip(idx_arr, type_arr):
+                n = self.obmap.get(typ, 1)
+                ccg_map[idx] = current_wires[i:i+n]
+                i += n
+
+        for word, idx_arr, type_arr in tn_sorted:
+            for idx, typ in zip(idx_arr, type_arr):
+                if idx != 0:
+                    n = self.obmap.get(typ, 1)
+                    input_indices.extend([[w] for w in ccg_map[idx]])
+                    tensor_arr.extend([(None, '0_dag')] * n)
+        
+        einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
+        return einsum_expr, tensor_arr
+
+
+    def tn2ansatz_curried(self, tn):
+        self.reset_char()
+        ccg_map = {}
+        input_indices, tensor_arr = [], []
+        tn_sorted = sorted(tn, key=lambda x: (0 in x[1], len(x[1])))
+
+        for word, idx_arr, type_arr in tn_sorted:
+            current_wires = []
+            for idx, typ in zip(idx_arr, type_arr):
+                if idx in ccg_map:
+                    current_wires.extend(ccg_map[idx])
+                else:
+                    n = self.obmap.get(typ, 1)
+                    new_wires = [self.get_char() for _ in range(n)]
+                    current_wires.extend(new_wires)
+                    input_indices.extend([[w] for w in new_wires])
+                    tensor_arr.extend([(None, '0')] * n)
+
+            base_symbol = f"{word}__{'@'.join(type_arr)}"
+            current_wires, new_indices, new_tensors = self.ansatz(current_wires, base_symbol)
+            input_indices.extend([[idx for idx in ten] for ten in new_indices])
+            tensor_arr.extend(new_tensors)
+
+            i = 0
+            for idx, typ in zip(idx_arr, type_arr):
+                n = self.obmap.get(typ, 1)
+                ccg_map[idx] = current_wires[i:i+n]
+                i += n
+
+        for virtual_idx, physical_wires in ccg_map.items():
+            if virtual_idx != 0:
+                input_indices.extend([[w] for w in physical_wires])
+                tensor_arr.extend([(None, '0_dag')] * len(physical_wires))
+        
         einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
         return einsum_expr, tensor_arr
 
@@ -531,3 +587,50 @@ def BatchCRy(phase, dtype=torch.complex64):
     full_mat[:, 2:, 2:] = BatchRy(phase, dtype=dtype)
 
     return full_mat.view(B, 2, 2, 2, 2)
+
+def tn2qiskit(einsum_expr, gate_arr):
+    input_indices, out_list = einsum_expr
+    nq = sum(1 for _, gate in gate_arr if gate == '0')
+    qc = QuantumCircuit(nq, nq)
+    wire2q = defaultdict(list)
+    qcounter = 0
+    param_dict = {}
+
+    for idx_arr, (symbol, gate) in zip(input_indices, gate_arr):
+        if gate == '0':
+            wire_name = idx_arr[0]
+            wire2q[wire_name].append(qcounter)
+            qcounter += 1
+        elif gate == '0_dag':
+            wire2q[idx_arr[0]].pop()
+        else: 
+            num_in = len(idx_arr) // 2 
+            in_wires = idx_arr[:num_in]
+            out_wires = idx_arr[num_in:]
+            q_targets = [wire2q[w].pop(0) for w in in_wires]
+
+            gate_func = getattr(qc, gate.lower())
+            if symbol is None:
+                gate_func(*q_targets)
+            else:
+                new_param = Parameter(symbol)
+                gate_func(new_param, *q_targets)
+                param_dict[new_param] = np.random.rand() * 2 * np.pi
+            
+            for w, q in zip(out_wires, q_targets):
+                wire2q[w].append(q) 
+
+    output_qubits = []
+    for wire_name, q_list in wire2q.items():
+        if len(q_list) == 2:
+            q_left, q_right = q_list
+            qc.cx(q_left, q_right)
+            qc.h(q_left)
+            qc.measure(q_left, q_left)
+            qc.measure(q_right, q_right)
+        elif len(q_list) == 1:
+            q_out = q_list[0]
+            qc.measure(q_out, q_out)
+            output_qubits.append(q_out)
+    
+    return qc, output_qubits, param_dict

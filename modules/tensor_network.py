@@ -47,6 +47,8 @@ def analyse_einsum(einsum_expr, tarr, cache={}):
             elif op_type == '0':
                 data_shape = torch.Size([2])
                 nq += 1
+            elif op_type == '0_dag':
+                data_shape = torch.Size([2])
             elif op_type == 'H': data_shape = torch.Size([2, 2])
             elif op_type == 'CX': data_shape = torch.Size([2, 2, 2, 2])
         else:
