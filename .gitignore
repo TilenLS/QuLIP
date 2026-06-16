@@ -1,6 +1,7 @@
 mlflow.deb
 .DS_store
 images/
+scripts/
 data/
 data_compact/
 results/
