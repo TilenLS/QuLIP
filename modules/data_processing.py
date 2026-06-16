@@ -10,10 +10,7 @@ import pandas as pd
 
 clip_model, preprocess = clip.load("ViT-B/32")
 parser_path = '/Users/tls/Desktop/Work/COMP0267/assignment_5/COMP0267_CW/bobcat'
-if os.path.exists(parser_path):
-    ccg_parser = BobcatParser(model_name_or_path=parser_path, cache_dir=parser_path)
-else:
-    ccg_parser = None
+ccg_parser = BobcatParser(model_name_or_path=parser_path, cache_dir=parser_path)
 
 def store_pkl(data, fpathname):
     with open(fpathname, 'wb') as f:
@@ -53,19 +50,6 @@ class CLIP_Dataset(Dataset):
         pos_img_circ = self.pos_image_circuits[idx]
         neg_img_circ = self.neg_image_circuits[idx]
         return sent_circ, pos_img_circ, neg_img_circ
-    
-def coco_stream2df(data_subset):
-    data_list = []
-    
-    for entry in data_subset:
-        data_list.append({
-            'cocoid': entry['cocoid'],
-            'filename': entry['filename'],
-            'caption': entry['caption']
-        })
-    
-    df = pd.DataFrame(data_list)
-    return df
 
 def load_images(fname_arr, fpath):
     img_arr = []
@@ -100,6 +84,20 @@ def get_clip_embeddings(images):
     with torch.no_grad():
         embeddings = clip_model.encode_image(preprocessed)
     return embeddings.cpu().float()
+
+
+# def coco_stream2df(data_subset):
+#     data_list = []
+    
+#     for entry in data_subset:
+#         data_list.append({
+#             'cocoid': entry['cocoid'],
+#             'filename': entry['filename'],
+#             'caption': entry['caption']
+#         })
+    
+#     df = pd.DataFrame(data_list)
+#     return df
 
 # def get_valid_svo(df, fpath):
 #     drop_idx = [] 

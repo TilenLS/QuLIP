@@ -445,6 +445,107 @@ def tn2qc(tn_arr, ansatz, curry=False):
 #         qc_arr.append(qc)
 #     return qc_arr
 
+
+from sklearn.decomposition import PCA
+
+class ImageFeatureMap(BaseAnsatz):
+    def __init__(self, clip_dataset, k, obmap=set(), layers=2):
+        super().__init__(obmap, layers)
+        self.clip_dataset = clip_dataset
+        self.k = k
+        self.pca = PCA(n_components=k)
+        self.pca.fit(clip_dataset)
+
+    def compress_vector(self, raw_image_vector):
+        flat_vector = np.asarray(raw_image_vector).flatten()
+        compressed = self.pca.transform(flat_vector.reshape(1, -1))[0]
+        return compressed
+
+    def build_feature_map(self, raw_image_vector, base_symbol="img"):
+        self.reset_char()
+
+        features = self.compress_vector(raw_image_vector)
+        N = self.k
+
+        input_indices = []
+        tensor_arr = []
+
+        current_wires = [self.get_char() for _ in range(N)]
+        input_indices.extend([[w] for w in current_wires])
+        tensor_arr.extend([(None, '0')] * N)
+
+        for l in range(self.layers):
+            op_idx = 0
+
+            # Data injection layer
+            for i in range(N):
+                nxt = self.get_char()
+                input_indices.append(current_wires[i] + nxt)
+                tensor_arr.append((features[i], 'Rx'))
+                current_wires[i] = nxt
+
+            # Lernable rotation layer
+            for i in range(N):
+                nxt = self.get_char()
+                input_indices.append([current_wires[i], nxt])
+                tensor_arr.append((f"{base_symbol}_l{l}_{op_idx}", 'Ry'))
+                op_idx += 1
+
+            if N > 1:
+                for i in range(N-1):
+                    c_idx, t_idx = i, (i + 1) % N
+                    c_out, t_out = self.get_char(), self.get_char()
+                    input_indices.append([current_wires[c_idx], current_wires[t_idx], c_out, t_out])
+                    tensor_arr.append((f"{base_symbol}_l{l}_{op_idx}", 'CRz'))
+                    current_wires[c_idx], current_wires[t_idx] = c_out, t_out
+                    op_idx += 1
+            
+        ccg_map = {0: current_wires}
+        einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
+        return einsum_expr, tensor_arr
+
+def modal_compose(text_einsum, text_tensor_arr, img_einsum, img_tensor_arr):
+    text_indices = text_einsum[0]
+    all_text_chars = {char for tensor in text_indices for char in tensor}
+    max_text_char = max(all_text_chars) if all_text_chars else 'a'
+    char_offset = ord(max_text_char) + 1
+
+    text_outputs = text_einsum[1]
+    img_init_positions = [i for i, tensor in enumerate(img_tensor_arr) if tensor == (None, '0')]
+    if len(img_init_positions) != len(text_outputs):
+        raise ValueError("Dimension Mismatch between Text outputs and Image inputs!")
+    
+    img_indices = img_einsum[0]
+    boundary_wire_map = {img_indices[pos][0]: text_outputs[i] for i, pos in enumerate(img_init_positions)}
+
+    cleaned_img_indices = []
+    cleaned_img_tensor_arr = []
+    init_set = set(img_init_positions)
+
+    for i, tensor in enumerate(img_indices):
+        if i in init_set:
+            continue
+        remapped_tensor = []
+        for wire_char in tensor:
+            if wire_char in boundary_wire_map:
+                remapped_tensor.append(boundary_wire_map[wire_char])
+            else:
+                new_char = "".join(chr(ord(c) + char_offset) for c in wire_char)
+                remapped_tensor.append(new_char)
+        cleaned_img_indices.append(remapped_tensor)
+        cleaned_img_tensor_arr.append(img_tensor_arr[i])
+    unified_indices = text_indices + cleaned_img_indices
+    unified_tensor_arr = text_tensor_arr + cleaned_img_tensor_arr
+
+    final_outputs = []
+    for wire_char in img_indices[-1]:
+        if wire_char in boundary_wire_map:
+            final_outputs.append(boundary_wire_map[wire_char])
+        else:
+            new_char = "".join(chr(ord(c) + char_offset) for c in wire_char)
+            final_outputs.append(new_char)
+    return (unified_indices, final_outputs), unified_tensor_arr
+
 @qml.qnode(dev)
 def amplitude_encoding(f=None):
     qml.AmplitudeEmbedding(features=f, wires=range(OUT_DIM), normalize=True)

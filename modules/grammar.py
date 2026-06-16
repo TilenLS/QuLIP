@@ -158,26 +158,26 @@ def get_type(ccgtype):
 #     return df
 
 # ???
-def curry_type(ccg_type):
-    if ccg_type.is_atomic:
-        return ccg_type
+# def curry_type(ccg_type):
+#     if ccg_type.is_atomic:
+#         return ccg_type
     
-    res = curry_type(ccg_type.result)
-    arg = curry_type(ccg_type.argument)     
+#     res = curry_type(ccg_type.result)
+#     arg = curry_type(ccg_type.argument)     
     
-    if res.is_over and ccg_type.is_over:
-        return CCGType(result=CCGType(result=res.result, 
-                                      direction=ccg_type.direction, 
-                                      argument=arg),
-                       direction=res.direction,
-                       argument=res.argument)
+#     if res.is_over and ccg_type.is_over:
+#         return CCGType(result=CCGType(result=res.result, 
+#                                       direction=ccg_type.direction, 
+#                                       argument=arg),
+#                        direction=res.direction,
+#                        argument=res.argument)
     
-    return CCGType(result=res, direction=ccg_type.direction, argument=arg)
+#     return CCGType(result=res, direction=ccg_type.direction, argument=arg)
 
 # ???
-def curry_tree(node):
-    node.biclosed_type = curry_type(node.biclosed_type)
-    if not node.is_leaf:
-        for child in node.children:
-            curry_tree(child)
-    return node
+# def curry_tree(node):
+#     node.biclosed_type = curry_type(node.biclosed_type)
+#     if not node.is_leaf:
+#         for child in node.children:
+#             curry_tree(child)
+#     return node

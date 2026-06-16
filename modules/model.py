@@ -1,4 +1,3 @@
-from multiprocessing.util import info
 from lambeq import PytorchQuantumModel
 from tqdm import tqdm
 import torch
@@ -6,7 +5,7 @@ import torch.nn.functional as F
 from opt_einsum import contract_expression
 from collections import defaultdict
 from cotengra import einsum
-from modules.util import *
+from modules.quantum import *
 
 class EinsumModel(PytorchQuantumModel):
     def __init__(self, **kwargs):

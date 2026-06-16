@@ -11,6 +11,7 @@ text/
 *.jpg
 *.png 
 mlf_dbs/
+_*
 
 
 # Byte-compiled / optimized / DLL files
