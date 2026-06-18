@@ -77,7 +77,15 @@ def get_valid_images(df, fpath, img_labels='image_id'):
 
     return df.drop(df.index[drop_idx]).reset_index(drop=True)
 
-
+import numpy as np
+def set_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    elif torch.backends.mps.is_available():
+        torch.mps.manual_seed(seed)
 
 def get_clip_embeddings(images):
     preprocessed = torch.stack([preprocess(img) for img in images])

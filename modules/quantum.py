@@ -11,6 +11,38 @@ import numpy as np
 OUT_DIM = 9
 dev = qml.device('default.qubit', wires=OUT_DIM)
 
+
+def convert_einsum(expr):
+    if isinstance(expr, str):
+        if '->' not in expr:
+            raise ValueError("Invalid einsum string format. Missing '->' operator.")
+            
+        lhs, rhs = expr.split('->')
+        # Split into individual tensor tokens, cleaning up any accidental whitespace
+        input_tensors = [tok.strip() for tok in lhs.split(',') if tok.strip()]
+        
+        # Since string format maps 1 char = 1 index, list('ab') becomes ['a', 'b']
+        input_indices = [list(tensor) for tensor in input_tensors]
+        out_list = list(rhs.strip())
+        
+        return (input_indices, out_list)
+        
+    # Case 2: Convert Interleaved Tuple/List -> Standard String
+    elif isinstance(expr, (tuple, list)) and len(expr) == 2:
+        input_indices, out_list = expr
+        
+        # Flatten sublists back into joint character sequences
+        lhs = ",".join("".join(str(idx) for idx in sub) for sub in input_indices)
+        rhs = "".join(str(idx) for idx in out_list)
+        
+        return f"{lhs}->{rhs}"
+        
+    else:
+        raise TypeError(
+            "Unsupported expression type. Expected a standard string expression "
+            "or a 2-element tuple/list containing (input_indices, out_list)."
+        )
+
 class BaseAnsatz(ABC):
     def __init__(self, obmap=set(), layers=1):
         super().__init__()
@@ -43,15 +75,14 @@ class BaseAnsatz(ABC):
                     ccg_map[idx] = [self.get_char() for _ in range(self.obmap.get(typ, 1))]
         return ccg_map
 
-
-    # def _gen_einsum_expr(self, input_indices, ccg_map):
-    #     idx_counts = Counter("".join(input_indices))
-    #     output_indices = [c for c, cnt in idx_counts.items() if cnt == 1]
+    def _gen_einsum_expr(self, input_indices, ccg_map):
+        idx_counts = Counter("".join(input_indices))
+        output_indices = [c for c, cnt in idx_counts.items() if cnt == 1]
         
-    #     # Prioritize the root index (0) wires in the output string
-    #     root_indices = ccg_map.get(0, [])
-    #     out_str = "".join(c for c in root_indices if c in output_indices) + "".join(c for c in output_indices if c not in root_indices)
-    #     return ",".join(input_indices) + "->" + out_str
+        # Prioritize the root index (0) wires in the output string
+        root_indices = ccg_map.get(0, [])
+        out_str = "".join(c for c in root_indices if c in output_indices) + "".join(c for c in output_indices if c not in root_indices)
+        return ",".join(input_indices) + "->" + out_str
 
     @abstractmethod
     def ansatz(self, current_wires, base_symbol):
@@ -461,7 +492,7 @@ class ImageFeatureMap(BaseAnsatz):
         compressed = self.pca.transform(flat_vector.reshape(1, -1))[0]
         return compressed
 
-    def build_feature_map(self, raw_image_vector, base_symbol="img"):
+    def ansatz(self, raw_image_vector, base_symbol="img"):
         self.reset_char()
 
         features = self.compress_vector(raw_image_vector)
@@ -480,7 +511,7 @@ class ImageFeatureMap(BaseAnsatz):
             # Data injection layer
             for i in range(N):
                 nxt = self.get_char()
-                input_indices.append(current_wires[i] + nxt)
+                input_indices.append([current_wires[i], nxt])
                 tensor_arr.append((features[i], 'Rx'))
                 current_wires[i] = nxt
 
@@ -489,6 +520,7 @@ class ImageFeatureMap(BaseAnsatz):
                 nxt = self.get_char()
                 input_indices.append([current_wires[i], nxt])
                 tensor_arr.append((f"{base_symbol}_l{l}_{op_idx}", 'Ry'))
+                current_wires[i] = nxt
                 op_idx += 1
 
             if N > 1:
@@ -500,9 +532,9 @@ class ImageFeatureMap(BaseAnsatz):
                     current_wires[c_idx], current_wires[t_idx] = c_out, t_out
                     op_idx += 1
             
-        ccg_map = {0: current_wires}
-        einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
-        return einsum_expr, tensor_arr
+        einsum_expr = (input_indices, current_wires)
+        # einsum_expr = self.gen_einsum_expr(input_indices, ccg_map)
+        return convert_einsum(einsum_expr), tensor_arr
 
 def modal_compose(text_einsum, text_tensor_arr, img_einsum, img_tensor_arr):
     text_indices = text_einsum[0]

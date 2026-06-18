@@ -44,37 +44,19 @@ class EinsumModel(PytorchQuantumModel):
                     symbols_hash.add(symbol)
                     self.symbols.append(symbol)
 
-    def initialise_weights(self, near_id=False, temptrain=False, attention=False) -> None:
+    def initialise_weights(self, near_id=False, temp=0.07) -> None:
         self._reinitialise_modules()
         if not self.symbols:
             raise ValueError('Symbols not initialised. Instantiate through '
                              '`PytorchQuantumModel.from_diagrams()`.')
 
-        if temptrain:
-            self.log_temp = torch.nn.Parameter(torch.log(torch.tensor(0.07)), requires_grad=True)
-        else: 
-            self.log_temp = torch.log(torch.tensor(0.07))
+        self.log_temp = torch.log(torch.tensor(temp))
 
         if near_id:
             self.weights = torch.nn.Parameter(torch.empty(len(self.symbols)).uniform_(-0.01, 0.01), requires_grad=True)
         else:
             self.weights = torch.nn.Parameter(torch.empty(len(self.symbols)).uniform_(-torch.pi/2, torch.pi/2), requires_grad=True)
         self.sym2weight = {sym: idx for sym, idx in zip(self.symbols, range(len(self.weights)))}
-
-        if attention:
-            self.word_importance = torch.nn.Parameter(torch.zeros(len(self.symbols)), requires_grad=True)
-        else:
-            self.word_importance = torch.nn.Parameter(torch.zeros(len(self.symbols)), requires_grad=False)
-
-    def dropout(self, thetas, training=False):
-        if not training or self.drop_pr <= 0:
-            return thetas
-
-        # pr_arr = thetas/torch.sum(thetas)
-        # pr_arr = (1/thetas)/torch.sum(thetas)
-        pr_arr = torch.full(thetas.shape, 1 - self.drop_pr, device=thetas.device)
-        mask = torch.bernoulli(pr_arr)
-        return thetas * mask
 
     def compile_batch(self, batch_recipes):
         groups = defaultdict(list)
@@ -130,6 +112,19 @@ class EinsumModel(PytorchQuantumModel):
                 self.compile_batch(pos_tn_batch)
                 self.compile_batch(neg_tn_batch)
 
+    def compile_dataset2(self, data_loader, dataset='svo'):
+        if dataset == 'svo':
+            for batch in data_loader:
+                txt, pos_img, neg_img = batch
+                self.compile_batch(txt)
+                self.compile_batch(pos_img)
+                self.compile_batch(neg_img)
+        if dataset == 'aro':
+            for batch in data_loader:
+                pos_txt, neg_txt, img = batch
+                self.compile_batch(pos_txt)
+                self.compile_batch(neg_txt)
+                self.compile_batch(img)
 
     def fast_batch_contract(self, batch_recipes, training=False):
         groups = defaultdict(list)
@@ -226,26 +221,33 @@ class EinsumModel(PytorchQuantumModel):
         txt_out = torch.cat(txt_out)
         pos_img_out = torch.cat(pos_img_out)
         neg_img_out = torch.cat(neg_img_out)
-        return txt_out, pos_img_out, neg_img_out
-
-
-class QInfoNCE(torch.nn.Module):
-    def __init__(self, reduction='mean', device=None):
+        return txt_out, pos_img_out, neg_img_out  
+    
+class QInfoNCE_dot(torch.nn.Module):
+    def __init__(self, reduction='mean', device=None, eps=1e-7, lambda_reg=0.1):
         super().__init__()
-        self.cross_entropy = torch.nn.CrossEntropyLoss(reduction=reduction)
+        self.cross_entropy = torch.nn.CrossEntropyLoss(reduction=reduction, label_smoothing=0.1)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
         self.eps = eps
         self.lambda_reg = lambda_reg
     
     def forward(self, txt, img, T=0.07):
-        txt = F.normalize(txt.reshape(txt.size(0), -1), dim=1, p=2)
-        img = F.normalize(img.reshape(txt.size(0), -1), dim=1, p=2)
-        z = (txt @ img.conj().t()).abs()**2
-        logits = (torch.pi - torch.acos(z.clamp(0,1))) / T
-        labels = torch.arange(len(logits), device=self.device)
+        B = txt.size(0)
+        txt = F.normalize(txt.reshape(B, -1), dim=1, p=2)
+        img = F.normalize(img.reshape(B, -1), dim=1, p=2)
+
+        logits = (txt @ img.conj().t()).abs() / T
+        labels = torch.arange(B, device=self.device)
         loss_txt = self.cross_entropy(logits, labels)
         loss_img = self.cross_entropy(logits.t(), labels)
-        return (loss_txt + loss_img) / 2      
+        sym_loss =  (loss_txt + loss_img) / 2
+
+        if self.lambda_reg > 0:
+            txt_logits = (txt @ txt.conj().t()).abs()
+            off_diag = txt_logits[~torch.eye(B, dtype=torch.bool, device=txt.device)]
+            purity_penalty = off_diag.mean()
+            return sym_loss + self.lambda_reg * purity_penalty
+        return sym_loss
 
 class QInfoNCE_cos(torch.nn.Module):
     def __init__(self, reduction='mean', device=None, eps=1e-7, lambda_reg=0.1):
@@ -277,51 +279,7 @@ class QInfoNCE_cos(torch.nn.Module):
             return sym_loss + self.lambda_reg * purity_penalty
         return sym_loss
 
-class QInfoNCE_dot(torch.nn.Module):
-    def __init__(self, reduction='mean', device=None, eps=1e-7, lambda_reg=0.1):
-        super().__init__()
-        self.cross_entropy = torch.nn.CrossEntropyLoss(reduction=reduction, label_smoothing=0.1)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
-        self.eps = eps
-        self.lambda_reg = lambda_reg
-    
-    def forward(self, txt, img, T=0.07):
-        B = txt.size(0)
-        txt = F.normalize(txt.reshape(B, -1), dim=1, p=2)
-        img = F.normalize(img.reshape(B, -1), dim=1, p=2)
-
-        logits = (txt @ img.conj().t()).abs() / T
-        labels = torch.arange(B, device=self.device)
-        loss_txt = self.cross_entropy(logits, labels)
-        loss_img = self.cross_entropy(logits.t(), labels)
-        sym_loss =  (loss_txt + loss_img) / 2
-
-        if self.lambda_reg > 0:
-            txt_logits = (txt @ txt.conj().t()).abs()
-            off_diag = txt_logits[~torch.eye(B, dtype=torch.bool, device=txt.device)]
-            purity_penalty = off_diag.mean()
-            return sym_loss + self.lambda_reg * purity_penalty
-        return sym_loss
-    
-class QInfoNCE_log(torch.nn.Module):
-    def __init__(self, reduction='mean', device=None):
-        super().__init__()
-        self.cross_entropy = torch.nn.CrossEntropyLoss(reduction=reduction)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
-    
-    def forward(self, txt, img, T=0.07):
-        B = txt.size(0)
-        txt = F.normalize(txt.reshape(B, -1), dim=1, p=2)
-        img = F.normalize(img.reshape(B, -1), dim=1, p=2)
-
-        z = torch.abs(txt @ img.conj().t())**2
-        logits = torch.log(z + 1e-15) / T
-        labels = torch.arange(B, device=self.device)
-        loss_txt = self.cross_entropy(logits, labels)
-        loss_img = self.cross_entropy(logits.t(), labels)
-        return (loss_txt + loss_img) / 2  
-
-def update_model(model, data_loader, loss_fn, acc_fn, optimizer):
+def update_model_svo(model, data_loader, loss_fn, acc_fn, optimizer):
     cum_loss = cum_acc = cum_grad = 0
     model.train()
     for batch in data_loader:
@@ -372,7 +330,7 @@ def update_model_aro(model, data_loader, loss_fn, acc_fn, optimizer):
         optimizer.step()
         cum_loss += loss.item()
 
-        posres = acc_fn(pos_txt, img)   
+        posres = acc_fn(pos_txt, img)
         negres = acc_fn(neg_txt, img)
         cum_acc += (torch.sum((posres > negres))/len(posres)).item()
 
@@ -381,7 +339,37 @@ def update_model_aro(model, data_loader, loss_fn, acc_fn, optimizer):
     N = len(data_loader)
     return (cum_loss/N, cum_acc/N, cum_grad/N)
 
-def eval_model(model, data_loader, acc_fn):
+def update_model_aro2(model, data_loader, loss_fn, acc_fn, optimizer):
+    cum_loss = cum_acc = cum_grad = 0
+    model.train()
+    for batch in data_loader:
+        pos_circ, neg_circ, img_circ = batch
+
+        img_vec = model.fast_batch_contract(img_circ, False)
+        img_vec = img_vec.reshape(img_vec.size(0), -1)
+        neg_txt = model.fast_batch_contract(neg_circ, False)
+        neg_txt = neg_txt.reshape(neg_txt.size(0), -1)
+
+        optimizer.zero_grad()
+        pos_txt = model.fast_batch_contract(pos_circ, True)
+        pos_txt = pos_txt.reshape(pos_txt.size(0), -1)
+        loss = loss_fn(pos_txt, img_vec, model.temp)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        model.log_temp.data.clamp_(min=torch.log(torch.tensor(0.01)), max=torch.log(torch.tensor(1.0)))
+        optimizer.step()
+        cum_loss += loss.item()
+
+        posres = acc_fn(pos_txt, img_vec)
+        negres = acc_fn(neg_txt, img_vec)
+        cum_acc += (torch.sum((posres > negres))/len(posres)).item()
+
+        cum_grad += model.grad_norm
+
+    N = len(data_loader)
+    return (cum_loss/N, cum_acc/N, cum_grad/N)
+
+def eval_model_svo(model, data_loader, acc_fn):
     cum_acc = 0
     model.eval()
     with torch.no_grad():
@@ -419,6 +407,27 @@ def eval_model_aro(model, data_loader, acc_fn):
 
             posres = acc_fn(img, pos_txt)
             negres = acc_fn(img, neg_txt)
+            cum_acc += (torch.sum((posres > negres))/len(posres)).item()
+    
+    return cum_acc/len(data_loader)
+
+def eval_model_aro2(model, data_loader, acc_fn):
+    cum_acc = 0
+    model.eval()
+    with torch.no_grad():
+        for batch in data_loader:
+            pos_circ, neg_circ, img_circ = batch
+
+            pos_txt = model.fast_batch_contract(pos_circ, False)
+            neg_txt = model.fast_batch_contract(neg_circ, False)
+            img_vec = model.fast_batch_contract(img_circ, False)
+
+            pos_txt = pos_txt.reshape(pos_txt.size(0), -1)
+            neg_txt = neg_txt.reshape(neg_txt.size(0), -1)
+            img_vec = img_vec.reshape(img_vec.size(0), -1)
+
+            posres = acc_fn(img_vec, pos_txt)
+            negres = acc_fn(img_vec, neg_txt)
             cum_acc += (torch.sum((posres > negres))/len(posres)).item()
     
     return cum_acc/len(data_loader)

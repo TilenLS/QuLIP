@@ -4,10 +4,7 @@ from lambeq import BobcatParser
 import spacy, lemminflect, os, re
 
 parser_path = '/Users/tls/Desktop/Work/COMP0267/assignment_5/COMP0267_CW/bobcat'
-if os.path.exists(parser_path):
-    ccg_parser = BobcatParser(model_name_or_path=parser_path, cache_dir=parser_path)
-else:
-    ccg_parser = None
+ccg_parser = BobcatParser(model_name_or_path=parser_path, cache_dir=parser_path)
 nlp = spacy.load("en_core_web_sm")
 
 def lemmatise_sent(caption):
