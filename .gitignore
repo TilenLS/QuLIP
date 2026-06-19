@@ -2,12 +2,10 @@ mlflow.deb
 .DS_store
 .vscode/
 images/
-scripts/
 data/
 data_compact/
 results/
 text/
-*.ipynb
 *.db
 *.zip
 *.jpg
