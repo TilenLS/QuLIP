@@ -1,5 +1,6 @@
 mlflow.deb
 .DS_store
+.vscode/
 images/
 scripts/
 data/
