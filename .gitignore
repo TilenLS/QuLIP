@@ -14,6 +14,8 @@ text/
 mlf_dbs/
 _*
 modules_v2/
+playground/
+notebooks/playground/
 
 
 # Byte-compiled / optimized / DLL files
