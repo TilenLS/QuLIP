@@ -16,6 +16,11 @@ vision:
   layers: 10
   use_clip: false
 
+dataset:
+  class: "modules.data_pipeline.datasets.SVODataset"
+  collate_fn: "modules.data_pipeline.datasets.svo_collate_fn"
+  eval_mapper: "modules.models.fusion.engine.mscoco_mapper"
+
 splits:
   train:
     text_path: "data/svo-probes/processed/train.pkl"

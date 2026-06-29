@@ -93,7 +93,7 @@ class QuantumFeatureMap(nn.Module):
     def fit_image_pca(self, image_stream, batch_size=2048):
         batch = []
         for img_tensor in image_stream:
-            batch.append(img_tensor.numpy() if hasattr(img_tensor, 'numpy') else img_tensor)
+            batch.append(img_tensor.cpu().numpy() if hasattr(img_tensor, 'numpy') else img_tensor)
             if len(batch) == batch_size:
                 self.pca.partial_fit(np.array(batch))
                 batch = []

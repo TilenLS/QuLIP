@@ -83,7 +83,7 @@ class MMEvaluator:
             all_img.append(img_emb.cpu())
 
             einsums_batch, symbols_batch = [], []
-            for item_captions in batch["captions"]:
+            for item_captions in batch["caption"]:
                 num_captions = len(item_captions)
                 for _ in range(num_captions):
                     match_coordinates.append((global_img_idx, global_txt_idx))

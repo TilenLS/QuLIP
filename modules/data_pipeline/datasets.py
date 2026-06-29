@@ -83,7 +83,7 @@ class CocoDataset(BaseDataset):
                     }
         else:
             return {"image": image,
-                    "captions": list(zip(einsums, symbols))
+                    "caption": list(zip(einsums, symbols))
                     }
 
 def coco_collate_fn(batch):
