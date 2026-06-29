@@ -1,0 +1,20 @@
+model_type: "mlp"
+dataset: "mscoco"
+batch_size: 512
+learning_rate: 0.001
+epochs: 50
+embedding_dim: 512
+
+compiler:
+  use_tree: false
+
+vision:
+  use_clip: false
+
+splits:
+  train:
+    text_path: "data/mscoco/processed/train.pkl"
+    img_path: "data/mscoco/processed/images/train2017.zip"
+  val:
+    text_path: "data/mscoco/processed/validation.pkl"
+    img_path: "data/mscoco/processed/images/val2017.zip"

@@ -1,0 +1,25 @@
+model_type: "vqc"
+dataset: "svo-probes"
+batch_size: 256
+learning_rate: 0.001
+epochs: 100
+embedding_qubits: 9
+
+compiler:
+  ansatz: "custom_v5"
+  n: 3
+  s: 3
+  p: 3
+  layers: 3
+
+vision:
+  layers: 10
+  use_clip: false
+
+splits:
+  train:
+    text_path: "data/svo-probes/processed/train.pkl"
+    img_path: "data/svo-probes/processed/image_embeddings.pt"
+  val:
+    text_path: "data/svo-probes/processed/val.pkl"
+    img_path: "data/svo-probes/processed/image__embeddings.pt"

@@ -1,0 +1,24 @@
+model_type: "tn"
+dataset: "mscoco"
+batch_size: 512
+learning_rate: 0.001
+epochs: 25
+embedding_dim: 512
+
+compiler:
+  n: 128
+  s: 128
+  p: 128
+  bond_dim: 32
+  max_order: 2
+
+vision:
+  use_clip: false
+
+splits:
+  train:
+    text_path: "data/mscoco/processed/train.pkl"
+    img_path: "data/mscoco/processed/images/train2017.zip"
+  val:
+    text_path: "data/mscoco/processed/validation.pkl"
+    img_path: "data/mscoco/processed/images/val2017.zip"

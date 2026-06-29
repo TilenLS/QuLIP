@@ -1,10 +1,7 @@
-from platform import node
-
 from lambeq.text2diagram import CCGRule 
 from itertools import count 
 from collections import Counter
-from tqdm import tqdm  
-from modules.grammar import *
+from modules.symbolic.grammar import get_type
 
 def tree2einsum(root_node, simplify=True):
     if simplify:
@@ -164,25 +161,3 @@ def unify_codomain(tn):
     idx_arr[i][start_idx:end_idx] = [0]
     type_arr[i][start_idx:end_idx] = ['out']
     return list(zip(word_arr, idx_arr, type_arr))
-
-def tree2tn(df, labels=['caption'], simplify=True):
-    einsum_arr = []
-    for i, row in tqdm(df.iterrows(), total=len(df)):
-        einsum_batch = [unify_codomain(tree2einsum(row[label], simplify=simplify)) for label in labels]
-        einsum_arr.append(einsum_batch)
-    return einsum_arr
-
-# def tree2tn_aro(df):
-#     einsum_arr = []
-#     for i, row in tqdm(df.iterrows(), total=len(df)):
-#         pos_einsum = unify_codomain(tree2einsum(row['pos_tree']))
-#         neg_einsum = unify_codomain(tree2einsum(row['neg_tree']))
-#         einsum_arr.append((pos_einsum, neg_einsum))
-#     return einsum_arr
-
-# def tree2tn_svo(df):
-#     einsum_arr = []
-#     for i, row in tqdm(df.iterrows(), total=len(df)):
-#         einsum_expr = unify_codomain(tree2einsum(row['tree']))
-#         einsum_arr.append(einsum_expr)
-#     return einsum_arr
