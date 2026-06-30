@@ -112,6 +112,8 @@ class MLPCompiler:
                 else:
                     plan = self.compile_tn(row)
                     plans_arr.append(plan)
+                    row_symbols = [step['sym'] for step in plan]
+                    symbols_arr.append(row_symbols)
                     
             tn_df[f"{base_label}_einsum"] = plans_arr
             tn_df[f"{base_label}_symbols"] = symbols_arr

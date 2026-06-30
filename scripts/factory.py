@@ -12,6 +12,21 @@ from modules.models.vision.quantum_map import QuantumFeatureMap, FrozenCLIP
 from modules.models.vision.image_model import TTNImageModel
 
 from modules.models.fusion.criteria import FS_InfoNCE, InfoNCE
+import importlib
+
+def load_obj(import_str: str):
+    module_path, attr_name = import_str.rsplit('.', 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, attr_name)
+
+def build_dataset(config: dict):
+    ds_config = config['dataset']
+    
+    dataset_class = load_obj(ds_config['class'])
+    collate_fn = load_obj(ds_config['collate_fn'])
+    eval_mapper = load_obj(ds_config['eval_mapper'])
+    
+    return dataset_class, collate_fn, eval_mapper
 
 def build_experiment(config, device):
     model_type = config['model_type']
@@ -41,10 +56,10 @@ def build_experiment(config, device):
         
         # 2. Models
         if config['vision']['use_clip']:
-            image_model = FrozenCLIP().to(device)
+            image_model = FrozenCLIP(classical=False).to(device)
         else:
-            image_model = QuantumFeatureMap(k=compiler['embedding_qubits'], layers=config['vision']['layers']).to(device)
-        text_model = QCModel(out_q=config['compiler']['out']).to(device)
+            image_model = QuantumFeatureMap(k=config['embedding_qubits'], layers=config['vision']['layers'], batch_size=config['batch_size'], id_init=True).to(device)
+        text_model = QCModel(out_q=config['embedding_qubits']).to(device)
         
         # 3. Loss
         loss_fn = FS_InfoNCE()

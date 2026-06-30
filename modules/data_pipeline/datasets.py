@@ -13,11 +13,12 @@ def subsample_data(dataset, nsamp=0):
     return Subset(dataset, idx_arr)
 
 class BaseDataset(Dataset):
-    def __init__(self, compiled_df: pd.DataFrame, img_path: str | None, image_transform=None):
+    def __init__(self, compiled_df: pd.DataFrame, img_path: str | None, image_transform=None, mode: str = "train"):
         self.compiled_df = compiled_df
         self.image_transform = image_transform
         self.img_path = img_path
         self.img_store = img_path.split('.')[-1].lower() if img_path is not None else 'df'
+        self.mode = mode.lower()
 
         if self.img_store == 'zip':
             with zipfile.ZipFile(self.img_path, 'r') as archive:
@@ -58,11 +59,6 @@ class BaseDataset(Dataset):
         return img
 
 class CocoDataset(BaseDataset):
-    """Handles MSCOCO layout: 1 Image -> List of N alternative captions."""
-    def __init__(self, compiled_df: pd.DataFrame, img_path: str | None, image_transform=None, mode: str = "train"):
-        super().__init__(compiled_df, img_path, image_transform)
-        self.mode = mode.lower()
-
     def __getitem__(self, idx):
         row_compiled = self.compiled_df.iloc[idx]
         

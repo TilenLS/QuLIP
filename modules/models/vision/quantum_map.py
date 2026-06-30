@@ -5,19 +5,24 @@ import numpy as np
 from sklearn.decomposition import PCA, IncrementalPCA
 from opt_einsum import contract_expression
 from modules.compilation.quantum.gates import *
+from modules.utils.quantum_ops import amplitude_encoding
 
 
 class FrozenCLIP(nn.Module):
-    def __init__(self, clip_model = None):
+    def __init__(self, clip_model = None, classical=True):
         super().__init__()
         self.clip_model = clip_model
         self.params = nn.ParameterList([])
+        self.classical = classical
 
     def forward(self, img_vecs):
-        return img_vecs
+        if self.classical:
+            return img_vecs
+        else:
+            return amplitude_encoding(img_vecs)
 
 class QuantumFeatureMap(nn.Module):
-    def __init__(self, k: int, layers: int, batch_size: int):
+    def __init__(self, k: int, layers: int, batch_size: int, id_init=False):
         super().__init__()
         self.k = k
         self.layers = layers
@@ -26,11 +31,14 @@ class QuantumFeatureMap(nn.Module):
         self.sym2param = {}
         self.pca = IncrementalPCA(n_components=k)
 
-        self.init_params()
+        self.init_params(id_init)
         self.compile_fmap()
 
-    def init_params(self):
-        self.params = nn.Parameter(torch.randn(self.layers * (2*self.k - 1)) * 2 * torch.pi)
+    def init_params(self, id_init=False):
+        if id_init:
+            self.params = nn.Parameter(torch.empty(self.layers * (2*self.k - 1)).uniform_(-0.01, 0.01), requires_grad=True)
+        else:
+            self.params = nn.Parameter(torch.randn(self.layers * (2*self.k - 1)) * 2 * torch.pi)
 
     def reset_char(self):
         self.char_idx = count(0)

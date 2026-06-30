@@ -1,5 +1,4 @@
 model_type: "vqc"
-dataset: "svo-probes"
 batch_size: 256
 learning_rate: 0.001
 epochs: 100
@@ -11,15 +10,17 @@ compiler:
   s: 3
   p: 3
   layers: 3
+  curry = true
 
 vision:
-  layers: 10
+  layers: 3
   use_clip: false
 
 dataset:
+  name: "svo-probes"
   class: "modules.data_pipeline.datasets.SVODataset"
   collate_fn: "modules.data_pipeline.datasets.svo_collate_fn"
-  eval_mapper: "modules.models.fusion.engine.mscoco_mapper"
+  eval_mapper: "modules.models.fusion.engine.svo_mapper"
 
 splits:
   train:
@@ -27,4 +28,7 @@ splits:
     img_path: "data/svo-probes/processed/image_embeddings.pt"
   val:
     text_path: "data/svo-probes/processed/val.pkl"
-    img_path: "data/svo-probes/processed/image__embeddings.pt"
+    img_path: "data/svo-probes/processed/image_embeddings.pt"
+
+evaluation_tasks:
+  - "evaluate_image_choice"

@@ -3,6 +3,7 @@ from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
 from collections import defaultdict
 import numpy as np
+import torch.nn.functional as F
 
 def fs_distance(state1, state2):
     inner_product = torch.sum(state1 * state2.conj(), dim=1)
@@ -15,21 +16,22 @@ def qcosine(bstates1, bstates2, eps=1e-9):
     return inner_product.abs() / (norm1 * norm2 + eps)
 
 def amplitude_encoding(vector):
-    dim = len(vector)
-    num_qubits = math.ceil(math.log2(dim))
-    target_dim = 2 ** num_qubits
+    device = vector.device
+    batch_size, dim = vector.shape
 
+    num_qubits = math.ceil(math.log2(dim))
+    target_dim = 1 << num_qubits
 
     if dim < target_dim:
-        padding_size = target_dim - dim
-        vector = np.concatenate([vector, np.zeros(padding_size)])
+        vector = F.pad(vector, (0, target_dim - dim), value=0.0)
 
-    norm = np.linalg.norm(vector, ord=2)
-    if norm > 0:
-        state_vector = vector / norm
-    else:
-        state_vector = torch.zeros_like(vector)
-        state_vector[0] = 1.0
+    norm = torch.linalg.vector_norm(vector, ord=2, dim=-1, keepdim=True)
+
+    is_zero = (norm == 0) 
+    safe_norm = torch.where(is_zero, torch.ones_like(norm), norm)
+    state_vector = vector / safe_norm
+
+    state_vector[:, 0] = torch.where(is_zero.squeeze(-1), torch.tensor(1.0, device=device), state_vector[:, 0])
     
     return state_vector
 

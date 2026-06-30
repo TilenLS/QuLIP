@@ -3,12 +3,16 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from pathlib import Path
 
-from factory import build_experiment
-from modules.utils.general import load_pkl, store_pkl, get_device, set_seed
-from modules.data_pipeline.datasets import CocoDataset, coco_collate_fn
-from modules.models.fusion.engine import ContrastiveTrainer, MMEvaluator, mscoco_mapper
+from factory import build_experiment, build_dataset
+from modules.utils.general import load_pkl, get_device, set_seed
+from modules.models.fusion.engine import ContrastiveTrainer, MMEvaluator
 
-ROOT_PATH = os.getcwd()
+from tqdm import tqdm
+
+def log_phase(name: str):
+    print(f"\n [{name.upper()}] " + "—" * (60 - len(name)))
+
+
 # uv run python train.py --config configs/tensor_network.yaml
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -18,34 +22,64 @@ if __name__ == "__main__":
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
 
+    # Environment setup
+    log_phase("Environment Initialized")
     DEV = get_device()
-    BATCH_SIZE = config['batch_size']
-    DATASET = config['dataset']
-    print(f"Using device: {DEV}")
+    SEED = int.from_bytes(os.urandom(4))
+    set_seed(SEED)
 
+    ROOT_PATH = os.getcwd()
+    DATASET = config['dataset']['name']
+    BATCH_SIZE = config['batch_size']
+    print(f" Target Device : {DEV}")
+    print(f" Random Seed   : {SEED}")
+    print(f" Run Identifier: {DATASET}")
+
+    # Extract experiment components
+    log_phase("Setting Up Experiment Components")
     ansatz, image_model, text_model, loss_fn = build_experiment(config, DEV)
-    print("Loaded models and loss function.")
+    DatasetClass, collate_fn, eval_mapper = build_dataset(config)
+    print("Component structures built successfully.")
     
+    # Load and compile datasets
+    log_phase("Compiling Symbolic Datasets")
     df_train = load_pkl(config['splits']['train']['text_path'])
     df_val = load_pkl(config['splits']['val']['text_path'])
-    compiled_train = ansatz.compile_dataset(df_train)
-    compiled_val = ansatz.compile_dataset(df_val)
-    print(f"Compiled datasets: train={len(compiled_train)}, val={len(compiled_val)}")
 
+    compile_kwargs = {}
+    if config['model_type'] == 'vqc':
+        compile_kwargs["curry"] = config["compiler"].get("curry", False)
+    compiled_train = ansatz.compile_dataset(df_train, **compile_kwargs)
+    compiled_val = ansatz.compile_dataset(df_val, **compile_kwargs)
+    print(f"Dataset footprints compiled: Train={len(compiled_train)} | Val={len(compiled_val)}")
+
+    # Model initialisation phase
+    log_phase("Initializing Model Parameters")
     if hasattr(text_model, "from_symbols"):
         cols = [col for col in compiled_train.columns if col.endswith('_symbols')]
         txt_stream = []
         for col in cols:
             txt_stream += compiled_train[col].tolist() + compiled_val[col].tolist()
-        text_model.from_symbols(txt_stream)
-        print("Initialized text model with symbols.")
+        
+        sym_kwargs = {"id_init": True} if config["model_type"] == "vqc" else {}
+        text_model.from_symbols(txt_stream, **sym_kwargs)
+        print(f"Text Model vocabulary locked: {len(text_model.symbols)} distinct symbols.")
+
+    if hasattr(text_model, "from_plans"):
+        cols = [col for col in compiled_train.columns if col.endswith('_einsum')]
+        plan_stream = []
+        for col in cols:
+            plan_stream += compiled_train[col].tolist() + compiled_val[col].tolist()
+        text_model.from_plans(list(plan_stream))
+        print(f"Text Model Parameters mapped: {len(text_model.leaves)} Leaves | {len(text_model.mlps)} MLPs.")
 
     if hasattr(image_model, "fit_image_pca"):
         train_embeddings = torch.load(config['splits']['train']['img_path'])
         image_model.fit_image_pca(torch.stack(list(train_embeddings.values())).to(DEV))
-        img_transform = None
-        print("Fitted image model PCA with training embeddings.")
+        print("Visual projection layers calibrated via target PCA.")
 
+    # Prepare data loaders and optimisers
+    log_phase("Preparing Pipeline Execution")
     if config['vision']['use_clip']:
         img_transform = None
     else:
@@ -53,32 +87,33 @@ if __name__ == "__main__":
                                     v2.ToDtype(torch.float32, scale=True),
                                     v2.Resize((64, 64))])
 
-    train_dataset = CocoDataset(compiled_train, config['splits']['train']['img_path'], image_transform=img_transform, mode="train")
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, collate_fn=coco_collate_fn, shuffle=True, num_workers=4, pin_memory=True)
+    train_dataset = DatasetClass(compiled_train, config['splits']['train']['img_path'], image_transform=img_transform, mode="train")
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, shuffle=True, num_workers=4, pin_memory=True)
 
-    val_dataset = CocoDataset(compiled_val, config['splits']['val']['img_path'], image_transform=img_transform, mode="val")
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, collate_fn=coco_collate_fn, num_workers=4, pin_memory=True)
-    print(f"Data loaders ready: train={len(train_loader)}, val={len(val_loader)}")
+    val_dataset = DatasetClass(compiled_val, config['splits']['val']['img_path'], image_transform=img_transform, mode="val")
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, shuffle=False, num_workers=4, pin_memory=True)
+    print(f"Batched steps mapped: Train={len(train_loader)} steps | Val={len(val_loader)} steps")
 
     optimizer = torch.optim.Adam(list(text_model.parameters()) + list(image_model.parameters()), lr=config['learning_rate'])
     trainer = ContrastiveTrainer(image_model, text_model, optimizer, loss_fn, DEV)
     evaluator = MMEvaluator(image_model, text_model, DEV)
-    print("Trainer and evaluator initialized.")
+    print("Gradient step managers and performance metrics trackers bound.")
 
-    SEED = int.from_bytes(os.urandom(4))
-    set_seed(SEED)
-    print(f"Random seed set to: {SEED}")
-
-    print("Starting training loop...")
+    # Serialisation and logging setup
     run_name = f"{int(time.time())}"
-    checkpoint_path = f"./checkpoints/{DATASET}/{run_name}.pt"
-    Path(os.path.dirname(checkpoint_path)).mkdir(parents=True, exist_ok=True)
-    mlf_path = os.path.join(ROOT_PATH, f'mlf_dbs/{DATASET}.db')
+    checkpoint_dir = Path(f"./checkpoints/{DATASET}")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = checkpoint_dir / f"{run_name}.pt"
 
-    mlflow.pytorch.autolog()
-    mlflow.set_tracking_uri(f"sqlite:///{mlf_path}")
+    mlf_db_path = ROOT_PATH / f"mlf_dbs/{DATASET}.db"
+    mlf_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    mlflow.pytorch.autolog(log_models=False)
+    mlflow.set_tracking_uri(f"sqlite:///{mlf_db_path}")
     mlflow.set_experiment(DATASET)
 
+    # Training and evaluation loop
+    log_phase("Model optimisation and evaluation...")
     with mlflow.start_run(run_name=run_name):
         mlflow.log_params({
             "epochs": config['epochs'],
@@ -91,21 +126,34 @@ if __name__ == "__main__":
             "text_tower": type(text_model).__name__,
             })
         
-        for epoch in range(config['epochs']):
+        epoch_pbar = tqdm(range(config['epochs']), desc="Training Pipeline", unit="epoch")
+
+        for epoch in epoch_pbar:
             start_time = time.time()
-            loss = trainer.train_epoch(train_loader, mscoco_mapper)
-            end_time = time.time()
-            
-            metrics = evaluator.global_retrieval(val_loader, mscoco_mapper)
+            loss = trainer.train_epoch(train_loader, eval_mapper)
+            elapsed_time = time.time() - start_time
+
+            metrics = {}
+            tasks = config.get('evaluation_tasks', ['global_retrieval'])
+            for task_name in tasks:
+                eval_fn = getattr(evaluator, task_name, None)
+                if eval_fn is None:
+                    print(f"Warning: Evaluation method '{task_name}' not found on MMEvaluator. Skipping.")
+                    continue
+
+                task_metrics = eval_fn(val_loader, eval_mapper) if task_name == "global_retrieval" else eval_fn(val_loader)
+                metrics.update(task_metrics)
             
             mlflow.log_metrics(metrics, step=epoch)
-            output_str = [f"{k}: {v:.4f}" for k, v in metrics.items()]
-            print(f"Epoch {epoch} | Loss: {loss:.4f} | Metrics: {', '.join(output_str)} | Time: {end_time - start_time:.2f}s")
+            metrics_str = " | ".join([f"{k}: {v:.4f}" for k, v in metrics.items()])
+            tqdm.write(f"Epoch {epoch:02d} | Loss: {loss:.4f} | {metrics_str} | Time: {elapsed_time:.1f}s")
 
             torch.save({
                 "image": image_model.state_dict(),
                 "text": text_model.state_dict(),
                 "epoch": epoch,
                 "train_loss": loss,
-                "val_metrics": metrics if val_loader else None
+                "val_metrics": metrics
                 }, checkpoint_path)
+            
+    log_phase("Experiment Run Concluded")

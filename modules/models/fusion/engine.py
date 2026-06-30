@@ -65,9 +65,9 @@ class MMEvaluator:
         #positions = (rankings == target_indices[:, None]).nonzero(as_tuple=False)[:, 1]
         
         results = {}
-        results[f"{prefix}_recall_at_1"] = (positions < 1).float().mean().item()
-        results[f"{prefix}_recall_at_5"] = (positions < 5).float().mean().item()
-        results[f"{prefix}_recall_at_10"] = (positions < 10).float().mean().item()
+        results[f"{prefix}R1"] = (positions < 1).float().mean().item()
+        results[f"{prefix}R5"] = (positions < 5).float().mean().item()
+        results[f"{prefix}R10"] = (positions < 10).float().mean().item()
         results[f"{prefix}_mrr"] = (1.0 / (positions.float() + 1.0)).mean().item()
         return results
 
@@ -78,26 +78,30 @@ class MMEvaluator:
         all_img, all_txt = [], []
         global_img_idx, global_txt_idx = 0, 0
         match_coordinates = []
+
         for batch in dataloader:
-            img_emb = self._encode_img(batch["image"])
+            img_batch, txt_batch = batch_mapper(batch)
+            img_emb = self._encode_img(img_batch)
             all_img.append(img_emb.cpu())
 
-            einsums_batch, symbols_batch = [], []
-            for item_captions in batch["caption"]:
+            text_payload_batch = []
+            for item_captions in txt_batch:
+                if isinstance(item_captions[0], str) or isinstance(item_captions[0][0], dict):
+                    # Single element, either (str, [dict]) or ([dict], None)
+                    item_captions = [item_captions] 
+
                 num_captions = len(item_captions)
                 for _ in range(num_captions):
                     match_coordinates.append((global_img_idx, global_txt_idx))
                     global_txt_idx += 1
                 global_img_idx += 1
 
-                einsums = [c[0] for c in item_captions]
-                symbols = [c[1] for c in item_captions]
-                einsums_batch.extend(einsums)
-                symbols_batch.extend(symbols)
-            txt_emb = self._encode_txt((einsums_batch, symbols_batch))
+                for c in item_captions:
+                    text_payload_batch.append((c[0], c[1]))
+            txt_emb = self._encode_txt(text_payload_batch)
             all_txt.append(txt_emb.cpu())
 
-        similarity = torch.cat(all_img, dim=0) @ torch.cat(all_txt, dim=0).T 
+        similarity = (torch.cat(all_img, dim=0) @ torch.cat(all_txt, dim=0).T).abs()
         n_imgs, m_txts = similarity.shape
 
         mask = torch.zeros((n_imgs, m_txts), dtype=torch.bool, device=similarity.device)
@@ -111,12 +115,11 @@ class MMEvaluator:
         metrics.update(self._calculate_recall(similarity.T, mask.T, "t2i"))
 
         # --- 2. Advanced Geometric & Structural Latent Metrics ---
-        diag = torch.diag(similarity)
-        avg_positive = diag[mask].mean().item()
+        avg_positive = similarity[mask].mean().item()
         avg_negative = similarity[~mask].mean().item()
 
         # --- 3. Global Embedding Margin ---
-        metrics["embedding_margin"] = avg_positive - avg_negative
+        metrics["gamma"] = avg_positive - avg_negative
 
         # --- 4. Directional Hard-Negative Margins ---
         mask_matrix = similarity.clone()
@@ -130,11 +133,11 @@ class MMEvaluator:
         avg_pos_per_img = pos_matrix.sum(dim=1) / mask.sum(dim=1).float()
         avg_pos_per_txt = pos_matrix.sum(dim=0) / mask.sum(dim=0).float()
         
-        metrics["i2t_hard_negative_margin"] = (avg_pos_per_img - max_neg_i2t).mean().item()
-        metrics["t2i_hard_negative_margin"] = (avg_pos_per_txt - max_neg_t2i).mean().item()
+        metrics["i2t_hnm"] = (avg_pos_per_img - max_neg_i2t).mean().item()
+        metrics["t2i_hnm"] = (avg_pos_per_txt - max_neg_t2i).mean().item()
 
         # --- 5. Spatial Alignment Asymmetry ---
-        metrics["symmetry_gap"] = abs(metrics["i2t_recall_at_1"] - metrics["t2i_recall_at_1"])
+        metrics["delta"] = abs(metrics["i2tR1"] - metrics["t2iR1"])
             
         return metrics
     
@@ -153,7 +156,7 @@ class MMEvaluator:
             
             correct += (pos_sim > neg_sim).sum().item()
             total += img_emb.size(0)
-        return correct / total
+        return {"text_choice": correct / total}
 
 
     @torch.no_grad()
@@ -169,7 +172,7 @@ class MMEvaluator:
             
             correct += (pos_sim > neg_sim).sum().item()
             total += txt_emb.size(0)
-        return correct / total
+        return {"acc": correct / total}
     
     @torch.no_grad()
     def evaluate_sugarcrepe_pp(self, dataloader: torch.utils.data.DataLoader) -> float:
@@ -188,7 +191,7 @@ class MMEvaluator:
             correct += match.sum().item()
             total += img_emb.size(0)
             
-        return correct / total
+        return {"acc": correct / total}
 
     @torch.no_grad()
     def evaluate_winoground(self, dataloader) -> dict:
@@ -211,4 +214,4 @@ class MMEvaluator:
             group_corr += g_match.sum().item()
             total += i0.size(0)
         
-        return {"text_score": text_corr/total, "image_score": img_corr/total, "group_score": group_corr/total}
+        return {"txt_score": text_corr/total, "img_score": img_corr/total, "grp_score": group_corr/total}
