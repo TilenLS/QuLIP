@@ -1,4 +1,4 @@
-import torch, mlflow, time, yaml, argparse, os
+import torch, mlflow, time, yaml, argparse, os, logging
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from pathlib import Path
@@ -10,14 +10,16 @@ from modules.models.fusion.engine import ContrastiveTrainer, MMEvaluator
 from tqdm import tqdm
 
 def log_phase(name: str):
-    print(f"\n [{name.upper()}] " + "—" * (60 - len(name)))
-
+    print(f"\n[{name.upper()}] " + "—" * (60 - len(name)))
 
 # uv run python train.py --config configs/tensor_network.yaml
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, required=True, help='Path to experiment config YAML')
     args = parser.parse_args()
+
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+    logging.getLogger("mlflow").setLevel(logging.WARNING)
 
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
@@ -28,7 +30,7 @@ if __name__ == "__main__":
     SEED = int.from_bytes(os.urandom(4))
     set_seed(SEED)
 
-    ROOT_PATH = os.getcwd()
+    ROOT_PATH = Path.cwd()
     DATASET = config['dataset']['name']
     BATCH_SIZE = config['batch_size']
     print(f" Target Device : {DEV}")
@@ -39,7 +41,7 @@ if __name__ == "__main__":
     log_phase("Setting Up Experiment Components")
     ansatz, image_model, text_model, loss_fn = build_experiment(config, DEV)
     DatasetClass, collate_fn, eval_mapper = build_dataset(config)
-    print("Component structures built successfully.")
+    print(" Component structures built successfully.")
     
     # Load and compile datasets
     log_phase("Compiling Symbolic Datasets")
@@ -51,7 +53,7 @@ if __name__ == "__main__":
         compile_kwargs["curry"] = config["compiler"].get("curry", False)
     compiled_train = ansatz.compile_dataset(df_train, **compile_kwargs)
     compiled_val = ansatz.compile_dataset(df_val, **compile_kwargs)
-    print(f"Dataset footprints compiled: Train={len(compiled_train)} | Val={len(compiled_val)}")
+    print(f" Dataset footprints compiled: Train={len(compiled_train)} | Val={len(compiled_val)}")
 
     # Model initialisation phase
     log_phase("Initializing Model Parameters")
@@ -63,7 +65,7 @@ if __name__ == "__main__":
         
         sym_kwargs = {"id_init": True} if config["model_type"] == "vqc" else {}
         text_model.from_symbols(txt_stream, **sym_kwargs)
-        print(f"Text Model vocabulary locked: {len(text_model.symbols)} distinct symbols.")
+        print(f" Text Model vocabulary locked: {len(text_model.symbols)} distinct symbols.")
 
     if hasattr(text_model, "from_plans"):
         cols = [col for col in compiled_train.columns if col.endswith('_einsum')]
@@ -71,12 +73,12 @@ if __name__ == "__main__":
         for col in cols:
             plan_stream += compiled_train[col].tolist() + compiled_val[col].tolist()
         text_model.from_plans(list(plan_stream))
-        print(f"Text Model Parameters mapped: {len(text_model.leaves)} Leaves | {len(text_model.mlps)} MLPs.")
+        print(f" Text Model Parameters mapped: {len(text_model.leaves)} Leaves | {len(text_model.mlps)} MLPs.")
 
     if hasattr(image_model, "fit_image_pca"):
         train_embeddings = torch.load(config['splits']['train']['img_path'])
         image_model.fit_image_pca(torch.stack(list(train_embeddings.values())).to(DEV))
-        print("Visual projection layers calibrated via target PCA.")
+        print(" Visual projection layers calibrated via target PCA.")
 
     # Prepare data loaders and optimisers
     log_phase("Preparing Pipeline Execution")
@@ -92,12 +94,12 @@ if __name__ == "__main__":
 
     val_dataset = DatasetClass(compiled_val, config['splits']['val']['img_path'], image_transform=img_transform, mode="val")
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, shuffle=False, num_workers=4, pin_memory=True)
-    print(f"Batched steps mapped: Train={len(train_loader)} steps | Val={len(val_loader)} steps")
+    print(f" Batched steps mapped: Train={len(train_loader)} steps | Val={len(val_loader)} steps")
 
     optimizer = torch.optim.Adam(list(text_model.parameters()) + list(image_model.parameters()), lr=config['learning_rate'])
     trainer = ContrastiveTrainer(image_model, text_model, optimizer, loss_fn, DEV)
     evaluator = MMEvaluator(image_model, text_model, DEV)
-    print("Gradient step managers and performance metrics trackers bound.")
+    print(" Gradient step managers and performance metrics trackers bound.")
 
     # Serialisation and logging setup
     run_name = f"{int(time.time())}"
@@ -146,7 +148,7 @@ if __name__ == "__main__":
             
             mlflow.log_metrics(metrics, step=epoch)
             metrics_str = " | ".join([f"{k}: {v:.4f}" for k, v in metrics.items()])
-            tqdm.write(f"Epoch {epoch:02d} | Loss: {loss:.4f} | {metrics_str} | Time: {elapsed_time:.1f}s")
+            tqdm.write(f" Epoch {epoch:02d} | Loss: {loss:.4f} | {metrics_str} | Time: {elapsed_time:.1f}s")
 
             torch.save({
                 "image": image_model.state_dict(),

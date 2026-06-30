@@ -10,7 +10,7 @@ compiler:
   s: 3
   p: 3
   layers: 3
-  curry = true
+  curry: true
 
 vision:
   layers: 3
